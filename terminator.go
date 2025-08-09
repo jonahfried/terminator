@@ -47,6 +47,12 @@ func main() {
 	a := newApp()
 	unterminatedFiles := a.launchTerminator()
 	display(unterminatedFiles)
+
+	if len(unterminatedFiles) > 0 {
+		os.Exit(1)
+	}
+
+	os.Exit(0)
 }
 
 func (a *app) launchTerminator() []string {
