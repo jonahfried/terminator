@@ -9,20 +9,24 @@ import (
 	"strings"
 )
 
-type app struct {
+type terminationChecker struct {
 	startDir string
 
 	ignored      map[string]struct{}
 	ignoreHidden bool
+	quiet        bool
+	noGitIgnore  bool
 }
 
-func newApp() *app {
-	a := app{
+func newTerminationChecker() *terminationChecker {
+	a := terminationChecker{
 		ignored: make(map[string]struct{}),
 	}
 	var ignoreGlobs string
 
 	flag.BoolVar(&(a.ignoreHidden), "ignoreHidden", false, "whether to evaluate hidden files")
+	flag.BoolVar(&(a.quiet), "q", false, "quiet mode (don't print bad files, just return exit code)")
+	flag.BoolVar(&(a.noGitIgnore), "no-ignore", false, "whether to disregard .gitignore files")
 	flag.StringVar(&(a.startDir), "dir", ".", "directory to terminate")
 	flag.StringVar(&ignoreGlobs, "ignore", "", "comma seperated list of globs to ignore")
 	flag.Parse()
@@ -44,9 +48,12 @@ func newApp() *app {
 }
 
 func main() {
-	a := newApp()
-	unterminatedFiles := a.launchTerminator()
-	display(unterminatedFiles)
+	a := newTerminationChecker()
+	unterminatedFiles := a.launchChecker()
+
+	if !a.quiet {
+		display(unterminatedFiles)
+	}
 
 	if len(unterminatedFiles) > 0 {
 		os.Exit(1)
@@ -55,13 +62,13 @@ func main() {
 	os.Exit(0)
 }
 
-func (a *app) launchTerminator() []string {
-	unterminatedFiles := a.terminateDir(a.startDir)
+func (a *terminationChecker) launchChecker() []string {
+	unterminatedFiles := a.checkDir(a.startDir)
 	slices.Sort(unterminatedFiles)
 	return unterminatedFiles
 }
 
-func (a *app) terminateDir(dirName string) []string {
+func (a *terminationChecker) checkDir(dirName string) []string {
 	a.extendIgnored(dirName)
 
 	currentDir, err := os.ReadDir(dirName)
@@ -78,20 +85,14 @@ func (a *app) terminateDir(dirName string) []string {
 
 		failedTerminations = append(
 			failedTerminations,
-			a.terminateEntry(dirName, e)...,
+			a.checkEntry(dirName, e)...,
 		)
 	}
 
 	return failedTerminations
 }
 
-func (a *app) extendIgnored(dirName string) {
-	for k := range getIgnored(dirName) {
-		a.ignored[filepath.Join(dirName, k)] = struct{}{}
-	}
-}
-
-func (a *app) ignore(dirName string, entry os.DirEntry) bool {
+func (a *terminationChecker) ignore(dirName string, entry os.DirEntry) bool {
 	name := entry.Name()
 
 	currentPath := filepath.Join(dirName, name)
@@ -106,11 +107,21 @@ func (a *app) ignore(dirName string, entry os.DirEntry) bool {
 	return false
 }
 
-func (a *app) terminateEntry(path string, entry os.DirEntry) []string {
+func (a *terminationChecker) extendIgnored(dirName string) {
+	if a.noGitIgnore {
+		return
+	}
+
+	for k := range getIgnored(dirName) {
+		a.ignored[k] = struct{}{}
+	}
+}
+
+func (a *terminationChecker) checkEntry(path string, entry os.DirEntry) []string {
 	entryPath := filepath.Join(path, entry.Name())
 
 	if entry.IsDir() {
-		return a.terminateDir(entryPath)
+		return a.checkDir(entryPath)
 	}
 
 	terminated, err := isTerminated(entryPath)
@@ -162,25 +173,19 @@ func display(paths []string) {
 func getIgnored(dir string) map[string]struct{} {
 	ignored := make(map[string]struct{})
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ignored
-	}
-
 	gitignorePath := filepath.Join(dir, ".gitignore")
 	gitignore, err := os.ReadFile(gitignorePath)
 	if err != nil {
 		return map[string]struct{}{}
 	}
 
-	os.Chdir(dir)
-
 	for _, glob := range strings.Split(string(gitignore), "\n") {
-		if len(glob) > 0 && glob[0] == '#' {
+		glob = strings.TrimSpace(glob)
+		if len(glob) == 0 || glob[0] == '#' {
 			continue
 		}
 
-		matches, err := filepath.Glob(glob)
+		matches, err := filepath.Glob(filepath.Join(dir, glob))
 		if err != nil {
 			continue
 		}
@@ -189,8 +194,6 @@ func getIgnored(dir string) map[string]struct{} {
 			ignored[m] = struct{}{}
 		}
 	}
-
-	os.Chdir(cwd)
 
 	return ignored
 }
