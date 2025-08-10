@@ -26,6 +26,11 @@ func Test_terminationChecker(t *testing.T) {
 			path: "./testdata/test3/",
 			want: []string{"testdata/test3/inner/not3.txt", "testdata/test3/not2.txt"},
 		},
+		{
+			name: "nested_gitignore",
+			path: "./testdata/test4/",
+			want: []string{"testdata/test4/not1.txt", "testdata/test4/not2.txt"},
+		},
 	}
 
 	a := terminationChecker{
